@@ -51,6 +51,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         SP = 0
         # This is a good place to do initial setup
         self.scored_on_locations = []
+        self.defended_columns = set()
 
     def on_turn(self, turn_state):
         """
@@ -128,6 +129,11 @@ class AlgoStrategy(gamelib.AlgoCore):
         # upgrade walls so they soak more damage
         game_state.attempt_upgrade(wall_locations)
 
+        #self.defended_columns contains all the columns which have a wall or turret in them
+        #assume that on first turn, any turrets are placed behind walls so only need to look at walls
+        for sq in wall_locations:
+            self.defended_columns.add(sq[1])
+
     def build_reactive_defense(self, game_state):
         """
         This function builds reactive defenses based on where the enemy scored on us from.
@@ -139,7 +145,7 @@ class AlgoStrategy(gamelib.AlgoCore):
             build_location = [location[0], location[1]+1]
             game_state.attempt_spawn(TURRET, build_location)
 
-    def place_supports(self, game_state, attack_path, max_spend):
+    def place_supports(self, game_state, attack_path, max_spend=None):
         """
         Place supports (aka encryptors, shield units) to support an attack.
         attack_path: list of positions
@@ -148,7 +154,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         #assume supports only cost structure points and don't cost any mobile points
         #work out how many we can place
         current_SP = game_state.get_resource(SP)
-        max_spend = min(current_SP, max_spend)
+        max_spend = min(current_SP, max_spend) if max_spend is not None else current_SP
         support_cost = game_state.type_cost(SUPPORT, upgrade=False)[SP]
         upgrade_cost = game_state.type_cost(SUPPORT, upgrade=True)[SP]
         shield_range = self.config["unitInformation"][UNIT_TYPE_TO_INDEX[SUPPORT]]["shieldRange"]
@@ -176,7 +182,7 @@ class AlgoStrategy(gamelib.AlgoCore):
             while (plus_in_range or minus_in_range):
                 sq = (x+i,y)
                 if (plus_in_range
-                        and sq[0] in self.walled_columns
+                        and sq[0] in self.defended_columns
                         and sq not in path_squares_on_y[y]
                         and game_state.can_spawn(SUPPORT, sq)):
                     game_state.attempt_spawn(SUPPORT, sq)
@@ -186,7 +192,7 @@ class AlgoStrategy(gamelib.AlgoCore):
                     break
                 sq = (x-i,y)
                 if (minus_in_range
-                        and sq[0] in self.walled_columns
+                        and sq[0] in self.defended_columns
                         and sq not in path_squares_on_y[y]
                         and game_state.can_spawn(SUPPORT, sq)):
                     game_state.attempt_spawn(SUPPORT, sq)
