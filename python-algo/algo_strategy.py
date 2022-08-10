@@ -19,6 +19,14 @@ Advanced strategy tips:
   the actual current map state.
 """
 
+def are_in_range(loc_1, loc_2, range_):
+    """
+    Returns whether the two locations are in range of each other (Euclidean distance)
+    """
+    return (loc_1[0] - loc2[0])**2 + (loc_1[1] - loc2[1])**2 < range_**2
+def are_in_range_one_to_multi(loc_1, locs_2, range_):
+    return any(are_in_range(loc_1, loc, range) for loc in locs_2)
+
 class AlgoStrategy(gamelib.AlgoCore):
     def __init__(self):
         super().__init__()
@@ -131,12 +139,74 @@ class AlgoStrategy(gamelib.AlgoCore):
             build_location = [location[0], location[1]+1]
             game_state.attempt_spawn(TURRET, build_location)
 
+    def place_supports(self, game_state, attack_path, max_spend):
+        """
+        Place supports (aka encryptors, shield units) to support an attack.
+        attack_path: list of positions
+        max_spend: maximum SP that can be spent in this function call
+        """
+        #assume supports only cost structure points and don't cost any mobile points
+        #work out how many we can place
+        current_SP = game_state.get_resource(SP)
+        max_spend = min(current_SP, max_spend)
+        support_cost = game_state.type_cost(SUPPORT, upgrade=False)[SP]
+        upgrade_cost = game_state.type_cost(SUPPORT, upgrade=True)[SP]
+        shield_range = self.config["unitInformation"][UNIT_TYPE_TO_INDEX[SUPPORT]]["shieldRange"]
+        upg_shield_range = self.config["unitInformation"][UNIT_TYPE_TO_INDEX[SUPPORT]]["upgrade"]["shieldRange"]
+        num_to_place = max_spend // (support_cost + upgrade_cost)
+        SP_left = max_spend - num_to_place * (support_cost + upgrade_cost)
+        if support_cost < SP_left:
+            num_to_place += 1
+        #find where to place them
+        # - prioritise placing them further forward
+        # - make sure to place them where they can reach our units
+        # - only place them where they are protected by a wall in the same column
+        MAX_SUPPORT_Y = 10 #dont go too far forward
+        path_squares_on_y = [[] for i in range(27)]
+        for sq in attack_path:
+            path_squares_on_y[sq[1]].append(sq)
+        for y in range(MAX_SUPPORT_Y, -1, -1):
+            x = path_squares_on_y[y][0][0]
+            #try x+1, x-1, x+2, x-2, ...
+            path_squares_in_range = []
+            for row in path_squares_on_y[int(math.ceil(y-shield_range)) : int(y+shield_range)]:
+                path_squares_in_range.extend(row)
+            i = 1
+            plus_in_range = minus_in_range = True
+            while (plus_in_range or minus_in_range):
+                sq = (x+i,y)
+                if (plus_in_range
+                        and sq[0] in self.walled_columns
+                        and sq not in path_squares_on_y[y]
+                        and game_state.can_spawn(SUPPORT, sq)):
+                    game_state.attempt_spawn(SUPPORT, sq)
+                    game_state.attempt_upgrade(sq)
+                    num_to_place -= 1
+                if not num_to_place:
+                    break
+                sq = (x-i,y)
+                if (minus_in_range
+                        and sq[0] in self.walled_columns
+                        and sq not in path_squares_on_y[y]
+                        and game_state.can_spawn(SUPPORT, sq)):
+                    game_state.attempt_spawn(SUPPORT, sq)
+                    game_state.attempt_upgrade(sq)
+                    num_to_place -= 1
+                if not num_to_place:
+                    break
+                i += 1
+                plus_in_range  = are_in_range_one_to_multi((x+i,y), path_squares_in_range)
+                minus_in_range = are_in_range_one_to_multi((x-i,y), path_squares_in_range)
+            if not num_to_place:
+                break
+
     def stall_with_interceptors(self, game_state):
         """
         Send out interceptors at random locations to defend our base from enemy moving units.
         """
         # We can spawn moving units on our edges so a list of all our edge locations
-        friendly_edges = game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_LEFT) + game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_RIGHT)
+        friendly_edges = (game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_LEFT)
+                          + game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_RIGHT))
         
         # Remove locations that are blocked by our own structures 
         # since we can't deploy units there.
@@ -200,7 +270,10 @@ class AlgoStrategy(gamelib.AlgoCore):
         for location in game_state.game_map:
             if game_state.contains_stationary_unit(location):
                 for unit in game_state.game_map[location]:
-                    if unit.player_index == 1 and (unit_type is None or unit.unit_type == unit_type) and (valid_x is None or location[0] in valid_x) and (valid_y is None or location[1] in valid_y):
+                    if (unit.player_index == 1
+                        and (unit_type is None or unit.unit_type == unit_type)
+                        and (valid_x is None or location[0] in valid_x)
+                        and (valid_y is None or location[1] in valid_y)):
                         total_units += 1
         return total_units
         
