@@ -4,7 +4,7 @@ import math
 import warnings
 from sys import maxsize
 import json
-import numpy
+
 
 """
 Most of the algo code you write will be in this file unless you create new
@@ -43,6 +43,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         SP = 0
         # This is a good place to do initial setup
         self.scored_on_locations = []
+       
 
     def on_turn(self, turn_state):
         """
@@ -56,10 +57,16 @@ class AlgoStrategy(gamelib.AlgoCore):
         gamelib.debug_write('Performing turn {} of your custom algo strategy'.format(game_state.turn_number))
         game_state.suppress_warnings(True)  #Comment or remove this line to enable warnings.
 
-        self.starter_strategy(game_state)
-
+        #Only on the first turn
+        if(game_state.turn_number == 0):
+            self.initial_defences(game_state)
+            self.initial_interceptors(game_state)
+        else:
+            self.upgrade_walls(game_state)
+            self.build_turrets(game_state)
+            self.send_interceptors(game_state,self.check_defence(game_state))
+        
         game_state.submit_turn()
-
 
     """
     NOTE: All the methods after this point are part of the sample starter-algo
@@ -101,7 +108,13 @@ class AlgoStrategy(gamelib.AlgoCore):
                 support_locations = [[13, 2], [14, 2], [13, 3], [14, 3]]
                 game_state.attempt_spawn(SUPPORT, support_locations)
 
-    def build_defences(self, game_state):
+    
+    """
+    ///////
+    INITIAL DEFENCE SETUP
+    ///////
+    """
+    def initial_defences(self, game_state):
         """
         Build basic defenses using hardcoded locations.
         Remember to defend corners and avoid placing units in the front where enemy demolishers can attack them.
@@ -110,15 +123,28 @@ class AlgoStrategy(gamelib.AlgoCore):
         # More community tools available at: https://terminal.c1games.com/rules#Download
 
         # Place turrets that attack enemy units
-        turret_locations = [[0, 13], [27, 13], [8, 11], [19, 11], [13, 11], [14, 11]]
+        turret_locations = [[6, 12], [11, 11], [16, 11], [21, 12]]
         # attempt_spawn will try to spawn units if we have resources, and will check if a blocking unit is already there
         game_state.attempt_spawn(TURRET, turret_locations)
         
         # Place walls in front of turrets to soak up damage for them
-        wall_locations = [[8, 12], [19, 12]]
+        wall_locations = [[0, 13], [1, 13],[2,13],[3,12],[4,12],[5,12],[6,13],[11,12],[16,12],[21,13],[22,12],[23,12],[24,12],[25,13],[26,13],[27,13]]
         game_state.attempt_spawn(WALL, wall_locations)
+        # Upgraded wall locations
+        wall_upg_locations = [[6,13],[11,12],[16,12],[21,13]]
         # upgrade walls so they soak more damage
-        game_state.attempt_upgrade(wall_locations)
+        game_state.attempt_upgrade(wall_upg_locations)
+                            
+    
+    """
+    //////
+    SENDS THE INITIAL INTERCEPTORS
+    //////
+    """
+    def initial_interceptors(self, game_state):
+        intr_loc = [[6,7],[21,7]]
+        game_state.attempt_spawn(INTERCEPTOR, intr_loc)
+        
 
     def build_reactive_defense(self, game_state):
         """
@@ -154,6 +180,87 @@ class AlgoStrategy(gamelib.AlgoCore):
             units can occupy the same space.
             """
 
+    """
+    //////
+    CHECKS FOR THE WEAKEST DEFENCE
+    //////
+    """
+    def check_defence(self,game_state):
+        #Turrets will only be placed on rows 11 to 13
+        #Divides the map into four quarters and checks which quarter has the fewest turrets
+        turret_num = [0,0,0,0]
+        quarters = [[0,7],[7,14],[14,21],[21,28]]
+        for i in range(len(quarters)):
+            for j in range(quarters[i][0],quarters[i][1]):
+                for h in range(11,14):
+                    #Counts the number of turrets in each quarter
+                    turret_num[i] += len(game_state.get_attackers([j,h],1)) 
+        #Finds the quarter that has the least turrets
+        min_quart = turret_num.index(min(turret_num))
+        return(min_quart)
+
+                            
+    """
+    //////
+    SENDS INTERCEPTORS
+    //////
+    """
+    def send_interceptors(self, game_state,min_quart):
+        #List of spawn locations for interceptors
+        friendly_edges = game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_LEFT) + game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_RIGHT)
+        deploy_locations = self.filter_blocked_locations(friendly_edges, game_state)
+        quarters = [[0,7],[7,14],[14,21],[21,28]]
+        #Middle of the quarter
+        mid_point = [(quarters[min_quart][0]+quarters[min_quart][1]-1)/2,12]
+        #Finds the closest spawn point from the target
+        distance = 100
+        spawn_point = [0,0]
+        for i in range(len(deploy_locations)):
+            dist = game_state.game_map.distance_between_locations(deploy_locations[i],mid_point)
+            if dist <= distance:
+               spawn_point = deploy_locations[i]
+               distance = dist
+        #Spawns the interceptor at the closest spawn point
+        game_state.attempt_spawn(INTERCEPTOR, spawn_point)
+            
+
+    """
+    //////
+    BUILDS DEFENCES
+    //////
+    """
+    def rebuild_destroyed(self,game_state,destroyed_structures):
+        #Rebuilds the destroyed structures
+        for structure in destroyed_structures:
+            game_state.attempt_spawn(structure[2],[structure[0],structure[1]])
+
+
+    def upgrade_walls(self,game_state):
+        sp_available = game_state.get_resource(0,0)
+        current_sp = sp_available
+    
+        #Upgrades the walls (uses at most half the SP available)
+        for location in game_state.game_map:
+            if current_sp >= sp_available/2 and game_state.contains_stationary_unit(location):
+                for unit in game_state.game_map[location]:
+                    if unit.player_index == 0 and (unit_type is WALL):
+                        units_upgraded = game_state.attempt_upgrade(location)
+                        current_sp -= game_state.type_cost(WALL,True)[0]
+
+    def build_turrets(self,game_state):
+        quarter = check_defence(game_state)
+        turret_locs = [[[1,12],[2,12],[4,11],[5,11]],
+                       [[8,11],[9,11],[11,12],[12,12]],
+                       [[15,12],[16,12],[18,11],[19,11]],
+                       [[22,11],[23,11],[25,12],[26,12]]]
+
+        sp_available = game_state.get_resource(0,0)
+        current_sp = sp_available
+        while current_sp >= game_state.type_cost(TURRET)[0]:
+            game_state.attempt_spawn(TURRET,turret_locs[quarter])
+
+    
+        
     def demolisher_line_strategy(self, game_state):
         """
         Build a line of the cheapest stationary unit so our demolisher can attack from long range.
