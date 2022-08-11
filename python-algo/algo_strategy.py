@@ -232,7 +232,66 @@ class AlgoStrategy(gamelib.AlgoCore):
                 self.scored_on_locations.append(location)
                 gamelib.debug_write("All locations: {}".format(self.scored_on_locations))
 
+def findWeakestArea(self, game_state):
+    # figuring out how weak the bottom left is
+    # from (0, 14), (0, 18), (14, 14), (14, 18)
+    location_options = []
+    for x in range(15):
+        for y in range(15, 19):
+            location_options += [x, y]  
+    bottom_left_h = detectAreaWeakness(game_state, location_options)          
 
+    # figuring out how weak the bottom right is
+    # from (14, 14), (14, 18), (27, 14), (27, 18)
+    location_options = []
+    for x in range(15, 28):
+        for y in range(15, 19):
+            location_options += [x, y]
+    bottom_right_h = detectAreaWeakness(game_state, location_options)
+
+    # figuring out how weak the mid-left is
+    # from (0, 19), (0, 23), (14, 19), (14, 23)
+    location_options = []
+    for x in range(15):
+        for y in range (19, 24):
+            location_options += [x, y]
+    mid_left_h = detectAreaWeakness(game_state, location_options)
+
+    # figuring out how weak the mid-right is
+    location_options = []
+    for x in range(15, 28):
+        for y in range(19, 24):
+            location_options += [x, y]
+    mid_right_h = detectAreaWeakness(game_state, location_options)
+
+    # figuring out how weak the top is
+    location_options = []
+    for x in range(28):
+        for y in range(24, 28):
+            location_options += [x, y]
+    top_h = detectAreaWeakness(game_state, location_options)
+
+    d = {
+        't': top_h, 
+        'br': bottom_right_h,
+        'bl': bottom_left_h, 
+        'mr': mid_right_h,
+        'ml': mid_left_h
+    }
+
+    weakest = min(d, key=d.get)
+
+    return weakest
+
+# Helper function for findWeakestArea, given a set of locations returns an indication of how strong that area is
+def detectAreaWeakness(self, game_state, location_options):
+    strength = 0 
+    for location in location_options:
+        if game_state.contains_stationary_unit(location):
+            for unit in game_state.game_map[location]:
+                strength += unit.health
+    return strength
+           
 if __name__ == "__main__":
     algo = AlgoStrategy()
     algo.start()
