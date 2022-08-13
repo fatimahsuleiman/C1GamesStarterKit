@@ -19,18 +19,6 @@ Advanced strategy tips:
   the actual current map state.
 """
 
-def are_in_range(loc_1, loc_2, range_):
-    """
-    Returns whether the two locations are in range of each other (Euclidean distance)
-    """
-    return (loc_1[0] - loc2[0])**2 + (loc_1[1] - loc2[1])**2 < range_**2
-def are_in_range_one_to_multi(loc_1, locs_2, range_):
-    return any(are_in_range(loc_1, loc, range) for loc in locs_2)
-def is_structure(int_unit_type):
-    return int_unit_type in (0, 1, 2)
-FRAMEDATA_PLAYER_ID_SELF = 1
-FRAMEDATA_PLAYER_ID_ENEMY = 2
-
 class AlgoStrategy(gamelib.AlgoCore):
     def __init__(self):
         super().__init__()
@@ -55,10 +43,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         SP = 0
         # This is a good place to do initial setup
         self.scored_on_locations = []
-        self.scored_on_last_turn = []
-        self.defended_columns = set()
-        # (id, loc, type, total_damage, was_destroyed)
-        self.own_structures_attacked = []
+       
 
     def on_turn(self, turn_state):
         """
@@ -83,108 +68,9 @@ class AlgoStrategy(gamelib.AlgoCore):
         
         game_state.submit_turn()
 
-        #reset the variables that track damage on each turn
-        self.own_structures_attacked = []
-        self.scored_on_last_turn = []
+    
 
-    @staticmethod
-    def _x_to_quarter(x):
-        return x // 7
-
-    def place_supports(self, game_state, attack_path, max_spend=None):
-        """
-        Place supports (aka encryptors, shield units) to support an attack.
-        attack_path: list of positions
-        max_spend: maximum SP that can be spent in this function call
-        """
-        #assume supports only cost structure points and don't cost any mobile points
-        #work out how many we can place
-        current_SP = game_state.get_resource(SP)
-        max_spend = min(current_SP, max_spend) if max_spend is not None else current_SP
-        support_cost = game_state.type_cost(SUPPORT, upgrade=False)[SP]
-        upgrade_cost = game_state.type_cost(SUPPORT, upgrade=True)[SP]
-        shield_range = self.config["unitInformation"][UNIT_TYPE_TO_INDEX[SUPPORT]]["shieldRange"]
-        upg_shield_range = self.config["unitInformation"][UNIT_TYPE_TO_INDEX[SUPPORT]]["upgrade"]["shieldRange"]
-        num_to_place = max_spend // (support_cost + upgrade_cost)
-        SP_left = max_spend - num_to_place * (support_cost + upgrade_cost)
-        if support_cost < SP_left:
-            num_to_place += 1
-        #find where to place them
-        # - prioritise placing them further forward
-        # - make sure to place them where they can reach our units
-        # - only place them where they are protected by a wall in the same column
-        MAX_SUPPORT_Y = 10 #dont go too far forward
-        path_squares_on_y = [[] for i in range(27)]
-        for sq in attack_path:
-            path_squares_on_y[sq[1]].append(sq)
-        for y in range(MAX_SUPPORT_Y, -1, -1):
-            x = path_squares_on_y[y][0][0]
-            #try x+1, x-1, x+2, x-2, ...
-            path_squares_in_range = []
-            for row in path_squares_on_y[int(math.ceil(y-shield_range)) : int(y+shield_range)]:
-                path_squares_in_range.extend(row)
-            i = 1
-            plus_in_range = minus_in_range = True
-            while (plus_in_range or minus_in_range):
-                sq = (x+i,y)
-                if (plus_in_range
-                        and sq[0] in self.defended_columns
-                        and sq not in path_squares_on_y[y]
-                        and game_state.can_spawn(SUPPORT, sq)):
-                    game_state.attempt_spawn(SUPPORT, sq)
-                    game_state.attempt_upgrade(sq)
-                    num_to_place -= 1
-                if not num_to_place:
-                    break
-                sq = (x-i,y)
-                if (minus_in_range
-                        and sq[0] in self.defended_columns
-                        and sq not in path_squares_on_y[y]
-                        and game_state.can_spawn(SUPPORT, sq)):
-                    game_state.attempt_spawn(SUPPORT, sq)
-                    game_state.attempt_upgrade(sq)
-                    num_to_place -= 1
-                if not num_to_place:
-                    break
-                i += 1
-                plus_in_range  = are_in_range_one_to_multi((x+i,y), path_squares_in_range)
-                minus_in_range = are_in_range_one_to_multi((x-i,y), path_squares_in_range)
-            if not num_to_place:
-                break
-
-    def get_enemy_attack_data(self, game_state):
-        '''
-        Gets info about what happened last turn. Returns:
-        indices_of_attacked_quarters: [0, 1, 2, 3]
-        destroyed_structures: [(x, y, structure_type), ...]
-        damaged_structures: [(x, y), ...]
-        edge_squares_reached  [(x, y), ...]
-        '''
-        quarters_attacked = []
-        damage_in_quarter = [[0, 0], [0, 1], [0, 2], [0, 3]]
-        damaged_structures = []
-        destroyed_structures = []
-        for struc in self.own_structures_attacked:
-            loc = struc[1]
-            unit_type = struc[2]
-            hp_lost = struc[3]
-            was_killed = struc[4]
-            if was_killed:
-                destroyed_structures.append((*loc, unit_type))
-            else:
-                damaged_structures.append(loc)
-            damage_in_quarter[self._x_to_quarter(loc[0])][0] += hp_lost
-        edge_squares_reached = self.scored_on_last_turn
-        for sq in edge_squares_reached:
-            quarter = self._x_to_quarter(sq[0])
-            if quarter not in quarters_attacked:
-                quarters_attacked.append(quarter)
-        damage_in_quarter.sort(reverse=True, key=lambda a:a[0])
-        for a in damage_in_quarter:
-            if a[0] and (a[1] not in quarters_attacked):
-                quarters_attacked.append(a[1])
-        return quarters_attacked, destroyed_structures, damaged_structures, edge_squares_reached
-
+    
     """
     ///////
     INITIAL DEFENCE SETUP
@@ -210,11 +96,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         wall_upg_locations = [[6,13],[11,12],[16,12],[21,13]]
         # upgrade walls so they soak more damage
         game_state.attempt_upgrade(wall_upg_locations)
-        
-		#self.defended_columns contains all the columns which have a wall or turret in them
-        #assume that on first turn, any turrets are placed behind walls so only need to look at walls
-        for sq in wall_locations:
-            self.defended_columns.add(sq[1])
+                            
     
     """
     //////
@@ -245,7 +127,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         min_quart = turret_num.index(min(turret_num))
         return(min_quart)
 
-
+                            
     """
     //////
     SENDS INTERCEPTORS
@@ -307,6 +189,10 @@ class AlgoStrategy(gamelib.AlgoCore):
             current_sp -= turr_spawned * game_state.type_cost(TURRET)[0]
 
 
+   
+            
+
+
 
     """
     NOTE: All the methods after this point are part of the sample starter-algo
@@ -323,7 +209,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         # First, place basic defenses
         self.build_defences(game_state)
         # Now build reactive defenses based on where the enemy scored
-        self.build_reactive_defence(game_state)
+        self.build_reactive_defense(game_state)
 
         # If the turn is less than 5, stall with interceptors and wait to see enemy's base
         if game_state.turn_number < 5:
@@ -349,7 +235,8 @@ class AlgoStrategy(gamelib.AlgoCore):
                 game_state.attempt_spawn(SUPPORT, support_locations)
 
 
-    def build_reactive_defence(self, game_state):
+
+    def build_reactive_defense(self, game_state):
         """
         This function builds reactive defenses based on where the enemy scored on us from.
         We can track where the opponent scored by looking at events in action frames 
@@ -365,8 +252,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         Send out interceptors at random locations to defend our base from enemy moving units.
         """
         # We can spawn moving units on our edges so a list of all our edge locations
-        friendly_edges = (game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_LEFT)
-                          + game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_RIGHT))
+        friendly_edges = game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_LEFT) + game_state.game_map.get_edge_locations(game_state.game_map.BOTTOM_RIGHT)
         
         # Remove locations that are blocked by our own structures 
         # since we can't deploy units there.
@@ -382,8 +268,8 @@ class AlgoStrategy(gamelib.AlgoCore):
             """
             We don't have to remove the location since multiple mobile 
             units can occupy the same space.
-            """
-
+            """        
+        
     def demolisher_line_strategy(self, game_state):
         """
         Build a line of the cheapest stationary unit so our demolisher can attack from long range.
@@ -430,10 +316,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         for location in game_state.game_map:
             if game_state.contains_stationary_unit(location):
                 for unit in game_state.game_map[location]:
-                    if (unit.player_index == 1
-                        and (unit_type is None or unit.unit_type == unit_type)
-                        and (valid_x is None or location[0] in valid_x)
-                        and (valid_y is None or location[1] in valid_y)):
+                    if unit.player_index == 1 and (unit_type is None or unit.unit_type == unit_type) and (valid_x is None or location[0] in valid_x) and (valid_y is None or location[1] in valid_y):
                         total_units += 1
         return total_units
         
@@ -454,47 +337,16 @@ class AlgoStrategy(gamelib.AlgoCore):
         # Let's record at what position we get scored on
         state = json.loads(turn_string)
         events = state["events"]
-        for breach in events["breach"]:
+        breaches = events["breach"]
+        for breach in breaches:
             location = breach[0]
-            owner = breach[4]
+            unit_owner_self = True if breach[4] == 1 else False
             # When parsing the frame data directly, 
             # 1 is integer for yourself, 2 is opponent (StarterKit code uses 0, 1 as player_index instead)
-            if owner == FRAMEDATA_PLAYER_ID_ENEMY:
+            if not unit_owner_self:
                 gamelib.debug_write("Got scored on at: {}".format(location))
                 self.scored_on_locations.append(location)
-                self.scored_on_last_turn.append(location)
-        for damage_evt in events["damage"]:
-            unit_type = damage_evt[2]
-            owner = damage_evt[4]
-            if owner == 1 and is_structure(unit_type):
-                loc = damage_evt[0]
-                damage_hp = damage_evt[1]
-                unit_id = damage_evt[3]
-                unit_type_str = self.config["unitInformation"][unit_type]["shorthand"]
-                found = False
-                for struc in self.own_structures_attacked:
-                    if struc[0] == unit_id:
-                        struc[3] += damage_hp
-                        found = True
-                        break
-                if not found:
-                    self.own_structures_attacked.append([unit_id, loc, unit_type_str, damage_hp, False])
-        for death_evt in events["death"]:
-            unit_type = death_evt[1]
-            owner = death_evt[3]
-            was_intentional = death_evt[4]
-            if owner == 1 and is_structure(unit_type) and not was_intentional:
-                loc = death_evt[0]
-                unit_id = death_evt[2]
-                found = False
-                for struc in self.own_structures_attacked:
-                    if struc[0] == unit_id:
-                        struc[4] = True
-                        found = True
-                        break
-                if not found:
-                    gamelib.debug_write('Structure was maliciously destroyed but not damaged '+
-                                        str(death_evt))
+                gamelib.debug_write("All locations: {}".format(self.scored_on_locations))
 
 
 if __name__ == "__main__":
