@@ -54,7 +54,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         # This is a good place to do initial setup
         self.scored_on_locations = []
         self.scored_on_last_turn = []
-        self.defended_columns = set()
+        self.defences_by_column = [0 for i in range(28)]
         # (id, loc, type, total_damage, was_destroyed)
         self.own_structures_attacked = []
 
@@ -85,71 +85,93 @@ class AlgoStrategy(gamelib.AlgoCore):
         self.own_structures_attacked = []
         self.scored_on_last_turn = []
 
+    '''
+    Utility function works out which quarter an x-coordinate is on
+    '''
     @staticmethod
     def _x_to_quarter(x):
         return x // 7
 
-    def place_supports(self, game_state, attack_path, max_spend=None):
-        """
-        Place supports (aka encryptors, shield units) to support an attack.
-        attack_path: list of positions
-        max_spend: maximum SP that can be spent in this function call
-        """
-        #assume supports only cost structure points and don't cost any mobile points
-        #work out how many we can place
-        current_SP = game_state.get_resource(SP)
-        max_spend = min(current_SP, max_spend) if max_spend is not None else current_SP
-        support_cost = game_state.type_cost(SUPPORT, upgrade=False)[SP]
-        upgrade_cost = game_state.type_cost(SUPPORT, upgrade=True)[SP]
-        shield_range = self.config["unitInformation"][UNIT_TYPE_TO_INDEX[SUPPORT]]["shieldRange"]
-        upg_shield_range = self.config["unitInformation"][UNIT_TYPE_TO_INDEX[SUPPORT]]["upgrade"]["shieldRange"]
-        num_to_place = max_spend // (support_cost + upgrade_cost)
-        SP_left = max_spend - num_to_place * (support_cost + upgrade_cost)
-        if support_cost < SP_left:
-            num_to_place += 1
-        #find where to place them
-        # - prioritise placing them further forward
-        # - make sure to place them where they can reach our units
-        # - only place them where they are protected by a wall in the same column
-        MAX_SUPPORT_Y = 10 #dont go too far forward
-        path_squares_on_y = [[] for i in range(27)]
-        for sq in attack_path:
-            path_squares_on_y[sq[1]].append(sq)
-        for y in range(MAX_SUPPORT_Y, -1, -1):
-            x = path_squares_on_y[y][0][0]
-            #try x+1, x-1, x+2, x-2, ...
-            path_squares_in_range = []
-            for row in path_squares_on_y[int(math.ceil(y-shield_range)) : int(y+shield_range)]:
-                path_squares_in_range.extend(row)
-            i = 1
-            plus_in_range = minus_in_range = True
-            while (plus_in_range or minus_in_range):
-                sq = (x+i,y)
-                if (plus_in_range
-                        and sq[0] in self.defended_columns
-                        and sq not in path_squares_on_y[y]
-                        and game_state.can_spawn(SUPPORT, sq)):
-                    game_state.attempt_spawn(SUPPORT, sq)
-                    game_state.attempt_upgrade(sq)
-                    num_to_place -= 1
-                if not num_to_place:
-                    break
-                sq = (x-i,y)
-                if (minus_in_range
-                        and sq[0] in self.defended_columns
-                        and sq not in path_squares_on_y[y]
-                        and game_state.can_spawn(SUPPORT, sq)):
-                    game_state.attempt_spawn(SUPPORT, sq)
-                    game_state.attempt_upgrade(sq)
-                    num_to_place -= 1
-                if not num_to_place:
-                    break
-                i += 1
-                plus_in_range  = are_in_range_one_to_multi((x+i,y), path_squares_in_range)
-                minus_in_range = are_in_range_one_to_multi((x-i,y), path_squares_in_range)
-            if not num_to_place:
-                break
+    '''
+    ////////////////
+    FIND OUR WEAKEST AREA OF DEFENCE
+    ///////////////
+    '''
+    def find_weakest_area(self, game_state):
+        # figuring out how weak the bottom left is
+        location_options = []
+        for x in range(15):
+            for y in range(15, 22):
+                location_options += [x, y]
+        bottom_left_h = detect_area_weakness(game_state, location_options)
 
+        # figuring out how weak the bottom right is
+        location_options = []
+        for x in range(15, 28):
+            for y in range(15, 22):
+                location_options += [x, y]
+        bottom_right_h = detect_area_weakness(game_state, location_options)
+
+        # figuring out how weak the top left is
+        location_options = []
+        for x in range(15):
+            for y in range(22, 28):
+                location_options += [x, y]
+        top_left_h = detect_area_weakness(game_state, location_options)
+
+        # figuring out how weak the top right is
+        location_options = []
+        for x in range(15, 28):
+            for y in range(22, 28):
+                location_options += [x, y]
+        top_right_h = detect_area_weakness(game_state, location_options)
+
+        d = {
+            'tl': top_left_h,
+            'tr': top_right_h,
+            'br': bottom_right_h,
+            'bl': bottom_left_h,
+        }
+
+        weakest = min(d, key=d.get)
+
+        return weakest
+
+    # Helper function for find_weakest_area, given a set of locations returns an indication of how strong that area is
+    def detect_area_weakness(self, game_state, location_options):
+        strength = 0
+        for location in location_options:
+            if game_state.contains_stationary_unit(location):
+                for unit in game_state.game_map[location]:
+                    strength += unit.health
+        return strength
+
+    # Function which finds path to edge and checks for defences on that path
+    # The 'area' argument is designed to work with a given outut from find_weakest_area
+    def find_path_and_defences(self, game_state, area, start_location):
+        if area == 'tl':
+            edge = game_state.game_map.TOP_LEFT
+        elif area == 'tr':
+            edge = game_state.game_map.TOP_RIGHT
+        elif area == 'bl':
+            edge = game_state.game_map.BOTTOM_LEFT
+        else:
+            edge = game_state.game_map.BOTTOM_RIGHT
+
+        path = game_state.find_path_to_edge(start_location, edge)
+        potential_attackers = []
+        for location in path:
+            attackers = game_state.get_attackers(location, 0)
+            for attacker in attackers:
+                potential_attackers += attacker
+
+        return (path, potential_attackers)
+
+    '''
+    //////////////
+    FIND WHERE ENEMY DID DAMAGE LAST TURN
+    //////////////
+    '''
     def get_enemy_attack_data(self, game_state):
         '''
         Gets info about what happened last turn. Returns:
@@ -169,6 +191,7 @@ class AlgoStrategy(gamelib.AlgoCore):
             was_killed = struc[4]
             if was_killed:
                 destroyed_structures.append((*loc, unit_type))
+                defences_by_column[loc[0]] -= 1
             else:
                 damaged_structures.append(loc)
             damage_in_quarter[self._x_to_quarter(loc[0])][0] += hp_lost
@@ -202,17 +225,18 @@ class AlgoStrategy(gamelib.AlgoCore):
         game_state.attempt_spawn(TURRET, turret_locations)
 
         # Place walls in front of turrets to soak up damage for them
-        wall_locations = [[0, 13], [1, 13],[2,13],[3,12],[4,12],[5,12],[6,13],[11,12],[16,12],[21,13],[22,12],[23,12],[24,12],[25,13],[26,13],[27,13]]
+        wall_locations = [[0,13], [1,13], [2,13], [3,12], [4,12], [5,12], [6,13], [11,12], [16,12],
+                          [21,13], [22,12], [23,12], [24,12], [25,13], [26,13], [27,13]]
         game_state.attempt_spawn(WALL, wall_locations)
         # Upgraded wall locations
-        wall_upg_locations = [[6,13],[11,12],[16,12],[21,13]]
+        wall_upg_locations = [[6,13], [11,12], [16,12], [21,13]]
         # upgrade walls so they soak more damage
         game_state.attempt_upgrade(wall_upg_locations)
 
-		#self.defended_columns contains all the columns which have a wall or turret in them
+	#self.defences_by_columns contains the number of walls and turrets in each column
         #assume that on first turn, any turrets are placed behind walls so only need to look at walls
         for sq in wall_locations:
-            self.defended_columns.add(sq[0])
+            self.defences_by_column[sq[0]] += 1
 
     """
     //////
@@ -277,7 +301,8 @@ class AlgoStrategy(gamelib.AlgoCore):
     def rebuild_destroyed(self, game_state, destroyed_structures):
         #Rebuilds the destroyed structures
         for structure in destroyed_structures:
-            game_state.attempt_spawn(structure[2], (structure[0], structure[1]) )
+            if game_state.attempt_spawn(structure[2], (structure[0], structure[1]) ):
+                self.defences_by_column[structure[0]] += 1
 
     def upgrade_walls(self, game_state, max_spend=None):
         #work out how many walls we can upgrade based on max spend
@@ -323,10 +348,75 @@ class AlgoStrategy(gamelib.AlgoCore):
         for loc in turret_locs:
             if game_state.attempt_spawn(TURRET, loc):
                 num_to_place -= 1
-                self.defended_columns.add(loc[0])
+                self.defences_by_column[loc[0]] += 1
             if not num_to_place:
                 break
 
+    '''
+    /////////
+    BUILD SUPPORTS
+    //////////
+    '''
+    def place_supports(self, game_state, attack_path, max_spend=None):
+        """
+        Place supports (aka encryptors, shield units) to support an attack.
+        attack_path: list of positions
+        max_spend: maximum SP that can be spent in this function call
+        """
+        #assume supports only cost structure points and don't cost any mobile points
+        #work out how many we can place
+        current_SP = game_state.get_resource(SP)
+        max_spend = min(current_SP, max_spend) if max_spend is not None else current_SP
+        support_cost = game_state.type_cost(SUPPORT, upgrade=False)[SP]
+        upgrade_cost = game_state.type_cost(SUPPORT, upgrade=True)[SP]
+        shield_range = self.config["unitInformation"][UNIT_TYPE_TO_INDEX[SUPPORT]]["shieldRange"]
+        upg_shield_range = self.config["unitInformation"][UNIT_TYPE_TO_INDEX[SUPPORT]]["upgrade"]["shieldRange"]
+        num_to_place = max_spend // (support_cost + upgrade_cost)
+        SP_left = max_spend - num_to_place * (support_cost + upgrade_cost)
+        if support_cost < SP_left:
+            num_to_place += 1
+        #find where to place them
+        # - prioritise placing them further forward
+        # - make sure to place them where they can reach our units
+        # - only place them where they are protected by a wall in the same column
+        MAX_SUPPORT_Y = 10 #dont go too far forward
+        path_squares_on_y = [[] for i in range(27)]
+        for sq in attack_path:
+            path_squares_on_y[sq[1]].append(sq)
+        for y in range(MAX_SUPPORT_Y, -1, -1):
+            x = path_squares_on_y[y][0][0]
+            #try x+1, x-1, x+2, x-2, ...
+            path_squares_in_range = []
+            for row in path_squares_on_y[int(math.ceil(y-shield_range)) : int(y+shield_range)]:
+                path_squares_in_range.extend(row)
+            i = 1
+            plus_in_range = minus_in_range = True
+            while (plus_in_range or minus_in_range):
+                sq = (x+i,y)
+                if (plus_in_range
+                        and defences_by_column[sq[0]] > 0
+                        and sq not in path_squares_on_y[y]
+                        and game_state.can_spawn(SUPPORT, sq)):
+                    game_state.attempt_spawn(SUPPORT, sq)
+                    game_state.attempt_upgrade(sq)
+                    num_to_place -= 1
+                if not num_to_place:
+                    break
+                sq = (x-i,y)
+                if (minus_in_range
+                        and defences_by_column[sq[0]] > 0
+                        and sq not in path_squares_on_y[y]
+                        and game_state.can_spawn(SUPPORT, sq)):
+                    game_state.attempt_spawn(SUPPORT, sq)
+                    game_state.attempt_upgrade(sq)
+                    num_to_place -= 1
+                if not num_to_place:
+                    break
+                i += 1
+                plus_in_range  = are_in_range_one_to_multi((x+i,y), path_squares_in_range)
+                minus_in_range = are_in_range_one_to_multi((x-i,y), path_squares_in_range)
+            if not num_to_place:
+                break
 
     """
     NOTE: All the methods after this point are part of the sample starter-algo
@@ -335,14 +425,14 @@ class AlgoStrategy(gamelib.AlgoCore):
 
     def starter_strategy(self, game_state):
         """
-        For defense we will use a spread out layout and some interceptors early on.
+        For defence we will use a spread out layout and some interceptors early on.
         We will place turrets near locations the opponent managed to score on.
         For offense we will use long range demolishers if they place stationary units near the enemy's front.
         If there are no stationary units to attack in the front, we will send Scouts to try and score quickly.
         """
         # First, place basic defenses
         self.build_defences(game_state)
-        # Now build reactive defenses based on where the enemy scored
+        # Now build reactive defences based on where the enemy scored
         self.build_reactive_defence(game_state)
 
         # If the turn is less than 5, stall with interceptors and wait to see enemy's base
@@ -371,7 +461,7 @@ class AlgoStrategy(gamelib.AlgoCore):
 
     def build_reactive_defence(self, game_state):
         """
-        This function builds reactive defenses based on where the enemy scored on us from.
+        This function builds reactive defences based on where the enemy scored on us from.
         We can track where the opponent scored by looking at events in action frames
         as shown in the on_action_frame function
         """
@@ -518,77 +608,6 @@ class AlgoStrategy(gamelib.AlgoCore):
                     gamelib.debug_write('Structure was maliciously destroyed but not damaged '+
                                         str(death_evt))
 
-
-
-    def find_weakest_area(self, game_state):
-        # figuring out how weak the bottom left is
-        location_options = []
-        for x in range(15):
-            for y in range(15, 22):
-                location_options += [x, y]
-        bottom_left_h = detect_area_weakness(game_state, location_options)
-
-        # figuring out how weak the bottom right is
-        location_options = []
-        for x in range(15, 28):
-            for y in range(15, 22):
-                location_options += [x, y]
-        bottom_right_h = detect_area_weakness(game_state, location_options)
-
-        # figuring out how weak the top left is
-        location_options = []
-        for x in range(15):
-            for y in range(22, 28):
-                location_options += [x, y]
-        top_left_h = detect_area_weakness(game_state, location_options)
-
-        # figuring out how weak the top right is
-        location_options = []
-        for x in range(15, 28):
-            for y in range(22, 28):
-                location_options += [x, y]
-        top_right_h = detect_area_weakness(game_state, location_options)
-
-        d = {
-            'tl': top_left_h,
-            'tr': top_right_h,
-            'br': bottom_right_h,
-            'bl': bottom_left_h,
-        }
-
-        weakest = min(d, key=d.get)
-
-        return weakest
-
-    # Helper function for find_weakest_area, given a set of locations returns an indication of how strong that area is
-    def detect_area_weakness(self, game_state, location_options):
-        strength = 0
-        for location in location_options:
-            if game_state.contains_stationary_unit(location):
-                for unit in game_state.game_map[location]:
-                    strength += unit.health
-        return strength
-
-    # Function which finds path to edge and checks for defences on that path
-    # The 'area' argument is designed to work with a given outut from find_weakest_area
-    def find_path_and_defences(self, game_state, area, start_location):
-        if area == 'tl':
-            edge = game_state.game_map.TOP_LEFT
-        elif area == 'tr':
-            edge = game_state.game_map.TOP_RIGHT
-        elif area == 'bl':
-            edge = game_state.game_map.BOTTOM_LEFT
-        else:
-            edge = game_state.game_map.BOTTOM_RIGHT
-
-        path = game_state.find_path_to_edge(start_location, edge)
-        potential_attackers = []
-        for location in path:
-            attackers = game_state.get_attackers(location, 0)
-            for attacker in attackers:
-                potential_attackers += attacker
-
-        return (path, potential_attackers)
 
 
 if __name__ == "__main__":
