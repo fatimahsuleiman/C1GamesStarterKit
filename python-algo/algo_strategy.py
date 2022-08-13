@@ -496,7 +496,77 @@ class AlgoStrategy(gamelib.AlgoCore):
                     gamelib.debug_write('Structure was maliciously destroyed but not damaged '+
                                         str(death_evt))
 
+def findWeakestArea(self, game_state):
+    # figuring out how weak the bottom left is
+    location_options = []
+    for x in range(15):
+        for y in range(15, 22):
+            location_options += [x, y]  
+    bottom_left_h = detectAreaWeakness(game_state, location_options)          
 
+    # figuring out how weak the bottom right is
+    location_options = []
+    for x in range(15, 28):
+        for y in range(15, 22):
+            location_options += [x, y]
+    bottom_right_h = detectAreaWeakness(game_state, location_options)
+
+    # figuring out how weak the top left is
+    location_options = []
+    for x in range(15):
+        for y in range(22, 28):
+            location_options += [x, y]
+    top_left_h = detectAreaWeakness(game_state, location_options)
+
+    # figuring out how weak the top right is
+    location_options = []
+    for x in range(15, 28):
+        for y in range(22, 28):
+            location_options += [x, y]
+    top_right_h = detectAreaWeakness(game_state, location_options)
+
+    d = {
+        'tl': top_left_h,
+        'tr': top_right_h, 
+        'br': bottom_right_h,
+        'bl': bottom_left_h, 
+    }
+
+    weakest = min(d, key=d.get)
+
+    return weakest
+
+# Helper function for findWeakestArea, given a set of locations returns an indication of how strong that area is
+def detectAreaWeakness(self, game_state, location_options):
+    strength = 0 
+    for location in location_options:
+        if game_state.contains_stationary_unit(location):
+            for unit in game_state.game_map[location]:
+                strength += unit.health
+    return strength
+
+# Function which finds path to edge and checks for defences on that path 
+# The 'area' argument is designed to work with a given outut from FindWeakestArea
+def findPathandDefences(self, game_state, area, start_location):
+    if area == 'tl':
+        edge = game_state.game_map.TOP_LEFT
+    elif area == 'tr':
+        edge = game_state.game_map.TOP_RIGHT
+    elif area == 'bl':
+        edge = game_state.game_map.BOTTOM_LEFT
+    else:
+        edge = game_state.game_map.BOTTOMRIGHT
+    
+    path = game_state.find_path_to_edge(start_location, edge)
+    potential_attackers = []
+    for location in path:
+        attackers = game_state.get_attackers(location, 0)
+        for attacker in attackers:
+            potential_attackers += attacker
+    
+    return (path, potential_attackers)
+
+           
 if __name__ == "__main__":
     algo = AlgoStrategy()
     algo.start()
