@@ -602,44 +602,6 @@ class AlgoStrategy(gamelib.AlgoCore):
             if not num_to_place:
                 break
 
-
-    """
-    //////
-    ATTACKS WITH DEMOLISHERS
-    /////
-    """
-    def demolisher_line_strategy(self, game_state,attack_left):
-        """
-        Build a line of the cheapest stationary unit so our demolisher can attack from long range.
-        """
-        # First let's figure out the cheapest unit
-        # We could just check the game rules, but this demonstrates how to use the GameUnit class
-
-        """
-        stationary_units = [WALL, TURRET, SUPPORT]
-        cheapest_unit = WALL
-        for unit in stationary_units:
-            unit_class = gamelib.GameUnit(unit, game_state.config)
-            if unit_class.cost[game_state.MP] < gamelib.GameUnit(cheapest_unit, game_state.config).cost[game_state.MP]:
-                cheapest_unit = unit
-        """
-
-        # Now let's build out a line of stationary units. This will prevent our demolisher from running into the enemy base.
-        # Instead they will stay at the perfect distance to attack the front two rows of the enemy base.
-        if attack_left == True:
-            for x in range(27,7,-1):
-                if game_state.can_spawn(WALL,[x,11]):
-                    game_state.attempt_spawn(WALL, cheapest_unit, [x, 11])
-                    game_state.attempt_remove([x,11])
-            game_state.attempt_spawn(DEMOLISHER, [24, 10], 1000) 
-
-        else:
-            for x in range(0,20):
-                if game_state.can_spawn(WALL,[x,11]):
-                    game_state.attempt_spawn(WALL, cheapest_unit, [x, 11])
-                    game_state.attempt_remove([x,11])
-            game_state.attempt_spawn(DEMOLISHER, [3, 10], 1000) 
-
     """
     NOTE: All the methods after this point are part of the sample starter-algo
     strategy and can safely be replaced for your custom algo.
@@ -716,11 +678,27 @@ class AlgoStrategy(gamelib.AlgoCore):
             units can occupy the same space.
             """
 
+    def demolisher_line_strategy(self, game_state):
+        """
+        Build a line of the cheapest stationary unit so our demolisher can attack from long range.
+        """
+        # First let's figure out the cheapest unit
+        # We could just check the game rules, but this demonstrates how to use the GameUnit class
+        stationary_units = [WALL, TURRET, SUPPORT]
+        cheapest_unit = WALL
+        for unit in stationary_units:
+            unit_class = gamelib.GameUnit(unit, game_state.config)
+            if unit_class.cost[game_state.MP] < gamelib.GameUnit(cheapest_unit, game_state.config).cost[game_state.MP]:
+                cheapest_unit = unit
 
+        # Now let's build out a line of stationary units. This will prevent our demolisher from running into the enemy base.
+        # Instead they will stay at the perfect distance to attack the front two rows of the enemy base.
+        for x in range(27, 5, -1):
+            game_state.attempt_spawn(cheapest_unit, [x, 11])
 
         # Now spawn demolishers next to the line
         # By asking attempt_spawn to spawn 1000 units, it will essentially spawn as many as we have resources for
-       
+        game_state.attempt_spawn(DEMOLISHER, [24, 10], 1000)
 
     def least_damage_spawn_location(self, game_state, location_options):
         """
