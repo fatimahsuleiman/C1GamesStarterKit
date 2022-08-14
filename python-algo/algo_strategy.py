@@ -80,13 +80,29 @@ class AlgoStrategy(gamelib.AlgoCore):
 
     def our_strategy(self, game_state):
         #Only on the first turn
-        if(game_state.turn_number == 0):
+        if game_state.turn_number == 0:
             self.initial_defences(game_state)
             self.initial_interceptors(game_state)
         else:
-            self.upgrade_walls(game_state)
-            self.build_turrets(game_state)
-            self.send_interceptors(game_state, self.check_defence(game_state))
+            quarters_attacked, destroyed_structures, damaged_structures, edge_squares_reached = get_enemy_attack_data(game_state)
+            if destroyed_structures:
+                #REBUILD WHAT WAS DESTROYED
+                self.rebuild_destroyed()
+                #UPGRADE SOME OF IT?
+            
+            sp_available = game_state.get_resource(SP)
+            mp_available = game_state.get_resource(MP)
+
+            #PLAN ATTACK. CHOOSE : MORE INTERCEPTORS / MORE SCOUTS / DESTROYERS
+
+            most_attacked_quarter = quarters_attacked[0]
+            if game_state.turn_number < 3:
+                self.upgrade_walls()
+                self.build_turrets(most_attacked_quarter)
+            else:
+                #UPGRADE A TURRET IF ENOUGH SP (furthest forward in most attacked quarter) (at most 1 in each quarter)
+                #OTHERWISE, IF ENOUGH SP and we have been attacked a lot BUILD A TURRET
+                #PLACE SUPPORTS (use up SP)
 
     '''
     Utility function works out which quarter an x-coordinate is on
@@ -169,6 +185,71 @@ class AlgoStrategy(gamelib.AlgoCore):
                 potential_attackers += attacker
 
         return (path, potential_attackers)
+
+    def get_damage_along_path(self, game_state, path):
+        damage = 0
+        for sq in path:
+            for attacker in game_state.get_attackers(sq, 0)):
+                damage += attacker.damage_i
+        return damage
+
+    def get_best_attack_path(self, game_state):
+        '''
+        Returns: least_damage_path - list of coordinates along path
+                 least_damage      - float, amount of damage taken on path
+                                     if one square advanced each frame, assuming
+                                     towers shoot once each frame?
+                 better_path       - list of coordinates along better path
+                 wall_required     - location (x,y) to place wall to achieve better path
+                 better_damage     - damage taken along better path (as above)
+        '''
+        #get all the free squares we can place mobile units on
+        TOP_RIGHT = game_state.game_map.TOP_RIGHT
+        TOP_LEFT = game_state.game_map.TOP_LEFT
+        possible_start_squares = []
+        for i in range(14):
+            sq = (i, 13-i)
+            if not game_state.contains_stationary_unit(sq):
+                possible_start_squares.append((sq,TOP_RIGHT))
+            sq = (14+i, i)
+            if not game_state.contains_stationary_unit(sq):
+                possible_start_squares.append((sq,TOP_LEFT))
+
+        #work out which path we will take the least damage on
+        least_damage = None
+        least_damage_path = None
+        edge = None
+        for start_sq, side in possible_start_squares:
+            path = game_state.find_path_to_edge(start_sq, edge)
+            damage = get_damage_along_path(game_state, path)
+            if least_damage is None or damage < least_damage:
+                least_damage = damage
+                least_damage_path = path
+                edge = side
+
+        #see if we can make it even better by placing a wall
+        #try placing walls on the path between y = 9 .. 13
+        better_path = None
+        wall_required = None
+        better_damage = least_damage
+        i = 0
+        while least_damage_path[i][1] < 9:
+            i += 1
+        while least_damage_path[i][1] <= 13:
+            #modifying game_state.game_map directly is kinda hacky...
+            units_here = game_state.game_map[least_damage_path[i]][:] #save
+            game_state.game_map.add_unit(WALL, least_damage_path[i])
+            new_path = game_state.find_path_to_edge(least_damage_path[0], edge)
+            damage = get_damage_along_path(game_state, new_path)
+            if damage < better_damage:
+                better_damage = damage
+                wall_required = least_damage_path[i]
+                better_path = new_path
+            game_state.game_map[least_damage_path[i]] = units_here #restore
+        if better_damage == least_damage:
+            better_damage = None
+
+        return least_damage_path, least_damage, better_path, wall_required, better_damage
 
     '''
     //////////////
@@ -329,7 +410,7 @@ class AlgoStrategy(gamelib.AlgoCore):
             if not number_to_upgrade:
                 break
 
-    def build_turrets(self, game_state, max_spend=None):
+    def build_turrets(self, game_state, quarter, max_spend=None):
         #work out how many to place based on how much SP we can spend
         current_SP = game_state.get_resource(SP)
         if max_spend is None:
@@ -338,7 +419,6 @@ class AlgoStrategy(gamelib.AlgoCore):
         num_to_place = max_spend // game_state.type_cost(TURRET)[SP]
 
         #choose where to place them
-        quarter = self.check_defence(game_state)
         turret_locs = [
             [(2, 12), (4, 11), (5, 11)],
             [(8, 11), (9, 11), (11,11), (12,11)],
