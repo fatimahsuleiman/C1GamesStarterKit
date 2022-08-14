@@ -98,18 +98,26 @@ class AlgoStrategy(gamelib.AlgoCore):
             self.initial_defences(game_state)
             self.initial_interceptors(game_state)
         elif game_state.turn_number < 3:
-            quarters_attacked, destroyed_structures, damaged_structures, edge_squares_reached = get_enemy_attack_data(game_state)
-            most_attacked_quarter = quarters_attacked[0]
-            self.upgrade_walls(game_state, max_spend=(game_state.get_resource(SP) / 2))
-            self.build_turrets(game_state, most_attacked_quarter)
+            quarters_attacked, destroyed_structures, damaged_structures, edge_squares_reached = self.get_enemy_attack_data(game_state)
+            if quarters_attacked:
+                defend_quarter = quarters_attacked[0] #most attacked quarter
+            else:
+                defend_quarter = game_state.turn_number % 2 + 1 #alternate btw 1 and 2 if no attacks
+            gamelib.debug_write('Concentrating defences on quarter {}'.format(defend_quarter))
+            self.upgrade_walls(game_state, max_spend=(game_state.get_resource(SP) - game_state.type_cost(TURRET)[SP]))
+            self.build_turrets(game_state, defend_quarter)
         else:
-            quarters_attacked, destroyed_structures, damaged_structures, edge_squares_reached = get_enemy_attack_data(game_state)
-            most_attacked_quarter = quarters_attacked[0]
+            quarters_attacked, destroyed_structures, damaged_structures, edge_squares_reached = self.get_enemy_attack_data(game_state)
+            if quarters_attacked:
+                defend_quarter = quarters_attacked[0] #most attacked quarter
+            else:
+                defend_quarter = game_state.turn_number % 4 #defend each quarter in turn if no attacks
+            gamelib.debug_write('Concentrating defences on quarter {}'.format(defend_quarter))
             total_damage_taken = sum(a[2] for a in damaged_structures) + sum(a[3] for a in destroyed_structures)
 
             #REBUILD WHAT WAS DESTROYED
             if destroyed_structures:
-                self.rebuild_destroyed()
+                self.rebuild_destroyed(game_state, destroyed_structures)
             
             sp_available = game_state.get_resource(SP)
             mp_available = game_state.get_resource(MP)
@@ -117,13 +125,13 @@ class AlgoStrategy(gamelib.AlgoCore):
             #BUILD MORE DEFENCES
             if edge_squares_reached or total_damage_taken > 200.0: #<-------------------- MAGIC NUMBER (turret has 90 health, upg wall has 150)
                 #our defences were breached or we took a lot of damage
-                if not self.upgrade_turret(game_state, most_attacked_quarter): #try to upgrade a turret
-                    self.build_turrets(game_state, most_attacked_quarter, max_spend=game_state.type_cost(TURRET)[SP])
+                if not self.upgrade_turret(game_state, defend_quarter): #try to upgrade a turret
+                    self.build_turrets(game_state, defend_quarter, max_spend=game_state.type_cost(TURRET)[SP])
                 self.upgrade_walls(game_state)
                 do_build_supports = False
             else:
                 #we didn't take too much damage : can afford to place supports
-                self.upgrade_turret(game_state, most_attacked_quarter)
+                self.upgrade_turret(game_state, defend_quarter)
                 do_build_supports = True
 
             #SEND INTERCEPTORS IF REQD
@@ -231,7 +239,7 @@ class AlgoStrategy(gamelib.AlgoCore):
     def get_damage_along_path(self, game_state, path):
         damage = 0
         for sq in path:
-            for attacker in game_state.get_attackers(sq, 0)):
+            for attacker in game_state.get_attackers(sq, 0):
                 damage += attacker.damage_i
         return damage
 
@@ -447,7 +455,7 @@ class AlgoStrategy(gamelib.AlgoCore):
     def upgrade_walls(self, game_state, max_spend=None):
         #work out how many walls we can upgrade based on max spend
         #By default, spend at most half of available SP
-        current_sp = game_state.get_resource(SP)
+        current_SP = game_state.get_resource(SP)
         if max_spend is None:
             max_spend = current_SP
         max_spend = min(max_spend, current_SP)
@@ -495,10 +503,13 @@ class AlgoStrategy(gamelib.AlgoCore):
     def upgrade_turret(self, game_state, quarter):
         turrets_in_quarter = [turret for turret in self.turret_locations if self._x_to_quarter(turret[0][0]) == quarter]
         if turrets_in_quarter: #check there are some turrets in the quarter
-            num_upgraded = len(turret for turret in self.turret_locations if turret[1])
+            num_upgraded = 0
+            for turret in self.turret_locations:
+                if turret[1]:
+                    num_upgraded += 1
             if not num_upgraded: #check none of the turrets are upgraded (we upgrade upto 1 per quarter)
                 furthest_forward_loc = max(turrets_in_quarter, key=lambda turret: turret[0][1])
-                return game_state.attempt_upgrade(furthest_forward_loc)
+                return game_state.attempt_upgrade(furthest_forward_loc[0])
         return 0
 
     '''
@@ -725,7 +736,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         for damage_evt in events["damage"]:
             unit_type = damage_evt[2]
             owner = damage_evt[4]
-            if owner == 1 and is_stationary(unit_type):
+            if owner == 1 and gamelib.game_state.is_stationary(unit_type):
                 loc = damage_evt[0]
                 damage_hp = damage_evt[1]
                 unit_id = damage_evt[3]
@@ -742,7 +753,7 @@ class AlgoStrategy(gamelib.AlgoCore):
             unit_type = death_evt[1]
             owner = death_evt[3]
             was_intentional = death_evt[4]
-            if owner == 1 and is_stationary(unit_type) and not was_intentional:
+            if owner == 1 and gamelib.game_state.is_stationary(unit_type) and not was_intentional:
                 loc = death_evt[0]
                 unit_id = death_evt[2]
                 found = False
