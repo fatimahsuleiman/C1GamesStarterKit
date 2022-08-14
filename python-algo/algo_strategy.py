@@ -68,8 +68,17 @@ class AlgoStrategy(gamelib.AlgoCore):
         """
         game_state = gamelib.GameState(self.config, turn_state)
         gamelib.debug_write('Performing turn {} of your custom algo strategy'.format(game_state.turn_number))
-        game_state.suppress_warnings(True)  #Comment or remove this line to enable warnings.
+##        game_state.suppress_warnings(True)  #Comment or remove this line to enable warnings.
 
+        self.our_strategy(game_state)
+
+        game_state.submit_turn()
+
+        #reset the variables that track damage on each turn
+        self.own_structures_attacked = []
+        self.scored_on_last_turn = []
+
+    def our_strategy(self, game_state):
         #Only on the first turn
         if(game_state.turn_number == 0):
             self.initial_defences(game_state)
@@ -77,13 +86,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         else:
             self.upgrade_walls(game_state)
             self.build_turrets(game_state)
-            self.send_interceptors(game_state,self.check_defence(game_state))
-
-        game_state.submit_turn()
-
-        #reset the variables that track damage on each turn
-        self.own_structures_attacked = []
-        self.scored_on_last_turn = []
+            self.send_interceptors(game_state, self.check_defence(game_state))
 
     '''
     Utility function works out which quarter an x-coordinate is on
@@ -94,7 +97,7 @@ class AlgoStrategy(gamelib.AlgoCore):
 
     '''
     ////////////////
-    FIND OUR WEAKEST AREA OF DEFENCE
+    FIND ENEMYS WEAKEST AREA OF DEFENCE
     ///////////////
     '''
     def find_weakest_area(self, game_state):
