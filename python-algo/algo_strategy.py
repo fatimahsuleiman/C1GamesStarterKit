@@ -233,39 +233,23 @@ class AlgoStrategy(gamelib.AlgoCore):
                 gamelib.debug_write("All locations: {}".format(self.scored_on_locations))
 
 def findWeakestArea(self, game_state):
-    # figuring out how weak the bottom left is
+    # figuring out how weak the LEFT is
     location_options = []
     for x in range(15):
-        for y in range(15, 22):
+        for y in range(15, 28):
             location_options += [x, y]  
-    bottom_left_h = detectAreaWeakness(game_state, location_options)          
+    left = detectAreaWeakness(game_state, location_options)          
 
-    # figuring out how weak the bottom right is
+    # figuring out how weak the RIGHT is
     location_options = []
     for x in range(15, 28):
-        for y in range(15, 22):
+        for y in range(15, 28):
             location_options += [x, y]
-    bottom_right_h = detectAreaWeakness(game_state, location_options)
-
-    # figuring out how weak the top left is
-    location_options = []
-    for x in range(15):
-        for y in range(22, 28):
-            location_options += [x, y]
-    top_left_h = detectAreaWeakness(game_state, location_options)
-
-    # figuring out how weak the top right is
-    location_options = []
-    for x in range(15, 28):
-        for y in range(22, 28):
-            location_options += [x, y]
-    top_right_h = detectAreaWeakness(game_state, location_options)
+    right = detectAreaWeakness(game_state, location_options)
 
     d = {
-        'tl': top_left_h,
-        'tr': top_right_h, 
-        'br': bottom_right_h,
-        'bl': bottom_left_h, 
+        'left': left,
+        'right': right
     }
 
     weakest = min(d, key=d.get)
@@ -284,14 +268,10 @@ def detectAreaWeakness(self, game_state, location_options):
 # Function which finds path to edge and checks for defences on that path 
 # The 'area' argument is designed to work with a given outut from FindWeakestArea
 def findPathandDefences(self, game_state, area, start_location):
-    if area == 'tl':
+    if area == 'left':
         edge = game_state.game_map.TOP_LEFT
-    elif area == 'tr':
-        edge = game_state.game_map.TOP_RIGHT
-    elif area == 'bl':
-        edge = game_state.game_map.BOTTOM_LEFT
     else:
-        edge = game_state.game_map.BOTTOMRIGHT
+        edge = game_state.game_map.TOP_RIGHT
     
     path = game_state.find_path_to_edge(start_location, edge)
     potential_attackers = []
