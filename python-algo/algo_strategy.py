@@ -84,8 +84,11 @@ class AlgoStrategy(gamelib.AlgoCore):
             self.initial_defences(game_state)
             self.initial_interceptors(game_state)
         else:
-            self.upgrade_walls(game_state)
-            self.build_turrets(game_state)
+            self.rebuild_destroyed(game_state,self.get_enemy_attack_data(game_state)[1])
+            if(game_state.turn_number > 3):
+                self.upgrade_walls(game_state)
+                self.build_turrets(game_state)
+
             self.send_interceptors(game_state, self.check_defence(game_state))
 
     '''
