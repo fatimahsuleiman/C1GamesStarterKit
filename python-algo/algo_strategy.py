@@ -361,6 +361,34 @@ class AlgoStrategy(gamelib.AlgoCore):
             if not num_to_place:
                 break
 
+    """
+    //////
+    UPGRADES TURRETS
+    //////
+    """
+    #Upgrades the furthest (or most central) turret of the attacked quarter
+    def upgrade_turrets(self, game_state, min_quart):
+         turret_locs = [
+            [(5, 11), (4, 11), (2, 12)],
+            [(12, 11), (8, 11), (11,11), (9,11)],
+            [(19,11), (15,11), (18,11), (16,11)],
+            [(23,11), (24,11), (25,12)],
+        ]
+    turrets = turret_locs[min_quart]
+    upgrade_loc = (0,0)
+    for location in turrets:
+        unit = contains_stationary_unit(location):
+        if unit != False and unit.unit_type == TURRET:
+            if unit.upgraded == True:
+                return
+            else:
+                upgrade_loc = location
+                
+    if location != (0,0):
+        game_state.attempt_upgrade(location)
+
+            
+
     '''
     /////////
     BUILD SUPPORTS
