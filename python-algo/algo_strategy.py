@@ -85,9 +85,11 @@ class AlgoStrategy(gamelib.AlgoCore):
             self.initial_interceptors(game_state)
         else:
             self.rebuild_destroyed(game_state,self.get_enemy_attack_data(game_state)[1])
-            if(game_state.turn_number > 3):
-                self.upgrade_walls(game_state)
+            if(game_state.turn_number < 3):
+                self.upgrade_walls(game_state,game_state.get_resource(SP)/2)
                 self.build_turrets(game_state)
+                
+            else:
 
             self.send_interceptors(game_state, self.check_defence(game_state))
 
@@ -317,7 +319,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         #By default, spend at most half of available SP
         current_sp = game_state.get_resource(SP)
         if max_spend is None:
-            max_spend = current_SP / 2
+            max_spend = current_SP
         max_spend = min(max_spend, current_SP)
         number_to_upgrade = max_spend // game_state.type_cost(WALL, upgrade=True)[SP]
 
