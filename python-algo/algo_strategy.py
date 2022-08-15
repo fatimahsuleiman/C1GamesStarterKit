@@ -71,6 +71,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         self.turret_locations = []
         # (id, loc, type, total_damage, was_destroyed)
         self.own_structures_attacked = []
+        self.destroyed_structures = []
 
     def on_turn(self, turn_state):
         """
@@ -92,11 +93,20 @@ class AlgoStrategy(gamelib.AlgoCore):
         self.own_structures_attacked = []
         self.scored_on_last_turn = []
 
+    def on_place_turret(self, game_state, loc):
+        self.defences_by_column[loc[0]] += 1
+        self.turret_locations.append([loc, False])
+        x, y = loc
+        for wall_loc in ([x,y+1], [x+1,y], [x-1,y]):
+            if game_state.attempt_spawn(WALL, wall_loc):
+                game_state.attempt_upgrade(wall_loc)
+                break
+
     def our_strategy(self, game_state):
         #Only on the first turn
         if game_state.turn_number == 0:
             self.initial_defences(game_state)
-            self.initial_interceptors(game_state)
+            #self.initial_interceptors(game_state)
 ##        elif game_state.turn_number < 3:
 ##            quarters_attacked, destroyed_structures, damaged_structures, edge_squares_reached = self.get_enemy_attack_data(game_state)
 ##            if quarters_attacked:
@@ -104,36 +114,38 @@ class AlgoStrategy(gamelib.AlgoCore):
 ##            else:
 ##                defend_quarter = game_state.turn_number % 2 + 1 #alternate btw 1 and 2 if no attacks
 ##            total_damage_taken = sum(a[2] for a in damaged_structures) + sum(a[3] for a in destroyed_structures)
-##            gamelib.debug_write('Total damage taken = {}'.format(total_damage_taken))
 ##            self.upgrade_walls(game_state, max_spend=(game_state.get_resource(SP) - game_state.type_cost(TURRET)[SP]))
 ##            self.build_turrets(game_state, defend_quarter)
 ##            self.send_interceptors(game_state, defend_quarter)
         else:
             quarters_attacked, destroyed_structures, damaged_structures, edge_squares_reached = self.get_enemy_attack_data(game_state)
+            self.destroyed_structures.extend(destroyed_structures)
             if quarters_attacked:
                 defend_quarter = quarters_attacked[0] #most attacked quarter
             else:
                 defend_quarter = game_state.turn_number % 4 #defend each quarter in turn if no attacks
             total_damage_taken = sum(a[2] for a in damaged_structures) + sum(a[3] for a in destroyed_structures)
-            gamelib.debug_write('Total damage taken = {}'.format(total_damage_taken))
-
-            #REBUILD WHAT WAS DESTROYED
-            if destroyed_structures:
-                self.rebuild_destroyed(game_state, destroyed_structures)
             
             sp_available = game_state.get_resource(SP)
             mp_available = game_state.get_resource(MP)
+            turret_cost = game_state.type_cost(TURRET)[SP]
+
+            
+            if destroyed_structures:
+                self.rebuild_destroyed(game_state, self.destroyed_structures, defend_quarter, max_spend=turret_cost)
 
             #BUILD MORE DEFENCES
             if edge_squares_reached or total_damage_taken > 200.0: #<-------------------- MAGIC NUMBER (turret has 90 health, upg wall has 150)
                 #our defences were breached or we took a lot of damage
                 if not self.upgrade_turret(game_state, defend_quarter): #try to upgrade a turret
-                    self.build_turrets(game_state, defend_quarter, max_spend=game_state.type_cost(TURRET)[SP])
+                    #build at most one turret
+                    self.build_turrets(game_state, defend_quarter, max_spend=turret_cost)
                 self.upgrade_walls(game_state)
-                self.send_interceptors(game_state, defend_quarter)
+##                self.send_interceptors(game_state, defend_quarter)
                 do_build_supports = False
             else:
                 #we didn't take too much damage : can afford to place supports
+                #try to rebuild a little of what was destroyed
                 self.upgrade_turret(game_state, defend_quarter)
                 do_build_supports = True
 
@@ -145,10 +157,12 @@ class AlgoStrategy(gamelib.AlgoCore):
                     attack_path = better_path
                     least_damage = better_damage
                     game_state.attempt_spawn(WALL, wall_required)
-            #send a demolisher if we would get a lot of damage along attack path
-            if least_damage > 75.0: #<------------------------------- MAGIC NUMBER (= 5 x start health of scout)
-                self.spawn_demolisher(game_state, attack_path)
-            self.spawn_scouts(game_state, attack_path)
+            if not game_state.turn_number % 2:
+                self.spawn_demolishers(game_state, attack_path)
+##            #send a demolisher if we would get a lot of damage along attack path
+##            if least_damage > 75.0: #<------------------------------- MAGIC NUMBER (= 5 x start health of scout)
+##                self.spawn_demolishers(game_state, attack_path, num=1)
+##            self.spawn_scouts(game_state, attack_path)
 
             #BUILD SUPPORTS
             if do_build_supports:
@@ -161,80 +175,60 @@ class AlgoStrategy(gamelib.AlgoCore):
     def _x_to_quarter(x):
         return x // 7
 
-##    '''
-##    ////////////////
-##    FIND ENEMYS WEAKEST AREA OF DEFENCE
-##    ///////////////
-##    '''
-##    def find_weakest_area(self, game_state):
-##        # figuring out how weak the bottom left is
-##        location_options = []
-##        for x in range(15):
-##            for y in range(15, 22):
-##                location_options += [x, y]
-##        bottom_left_h = detect_area_weakness(game_state, location_options)
-##
-##        # figuring out how weak the bottom right is
-##        location_options = []
-##        for x in range(15, 28):
-##            for y in range(15, 22):
-##                location_options += [x, y]
-##        bottom_right_h = detect_area_weakness(game_state, location_options)
-##
-##        # figuring out how weak the top left is
-##        location_options = []
-##        for x in range(15):
-##            for y in range(22, 28):
-##                location_options += [x, y]
-##        top_left_h = detect_area_weakness(game_state, location_options)
-##
-##        # figuring out how weak the top right is
-##        location_options = []
-##        for x in range(15, 28):
-##            for y in range(22, 28):
-##                location_options += [x, y]
-##        top_right_h = detect_area_weakness(game_state, location_options)
-##
-##        d = {
-##            'tl': top_left_h,
-##            'tr': top_right_h,
-##            'br': bottom_right_h,
-##            'bl': bottom_left_h,
-##        }
-##
-##        weakest = min(d, key=d.get)
-##
-##        return weakest
-##
-##    # Helper function for find_weakest_area, given a set of locations returns an indication of how strong that area is
-##    def detect_area_weakness(self, game_state, location_options):
-##        strength = 0
-##        for location in location_options:
-##            if game_state.contains_stationary_unit(location):
-##                for unit in game_state.game_map[location]:
-##                    strength += unit.health
-##        return strength
-##
-##    # Function which finds path to edge and checks for defences on that path
-##    # The 'area' argument is designed to work with a given outut from find_weakest_area
-##    def find_path_and_defences(self, game_state, area, start_location):
-##        if area == 'tl':
-##            edge = game_state.game_map.TOP_LEFT
-##        elif area == 'tr':
-##            edge = game_state.game_map.TOP_RIGHT
-##        elif area == 'bl':
-##            edge = game_state.game_map.BOTTOM_LEFT
-##        else:
-##            edge = game_state.game_map.BOTTOM_RIGHT
-##
-##        path = game_state.find_path_to_edge(start_location, edge)
-##        potential_attackers = []
-##        for location in path:
-##            attackers = game_state.get_attackers(location, 0)
-##            for attacker in attackers:
-##                potential_attackers += attacker
-##
-##        return (path, potential_attackers)
+    '''
+    ////////////////
+    FIND ENEMYS WEAKEST AREA OF DEFENCE
+    ///////////////
+    '''
+    def find_weakest_area(self, game_state):
+        # figuring out how weak the LEFT is
+        location_options = []
+        for x in range(15):
+            for y in range(15, 28):
+                location_options += [x, y]  
+        left = detectAreaWeakness(game_state, location_options)          
+
+        # figuring out how weak the RIGHT is
+        location_options = []
+        for x in range(15, 28):
+            for y in range(15, 28):
+                location_options += [x, y]
+        right = detectAreaWeakness(game_state, location_options)
+
+        d = {
+            'left': left,
+            'right': right
+        }
+
+        weakest = min(d, key=d.get)
+
+        return weakest
+
+    # Helper function for find_weakest_area, given a set of locations returns an indication of how strong that area is
+    def detect_area_weakness(self, game_state, location_options):
+        strength = 0
+        for location in location_options:
+            if game_state.contains_stationary_unit(location):
+                for unit in game_state.game_map[location]:
+                    strength += unit.health
+        return strength
+
+    # Function which finds path to edge and checks for defences on that path
+    # The 'area' argument is designed to work with a given outut from find_weakest_area
+    def find_path_and_defences(self, game_state, area, start_location):
+        if area == 'left':
+            edge = game_state.game_map.TOP_LEFT
+        else:
+            edge = game_state.game_map.TOP_RIGHT
+        
+        path = game_state.find_path_to_edge(start_location, edge)
+        potential_attackers = []
+        for location in path:
+            attackers = game_state.get_attackers(location, 0)
+            for attacker in attackers:
+                potential_attackers += attacker
+        
+        return (path, potential_attackers)
 
     def get_damage_along_path(self, game_state, path):
         damage = 0
@@ -309,12 +303,14 @@ class AlgoStrategy(gamelib.AlgoCore):
 
         return least_damage_path, least_damage, better_path, wall_required, better_damage
 
-    def spawn_demolisher(self, game_state, attack_path):
-        game_state.attempt_spawn(DEMOLISHER, attack_path[0])
+    def spawn_demolishers(self, game_state, attack_path, num=None):
+        if num is None:
+            num = int(game_state.get_resource(MP) / game_state.type_cost(DEMOLISHER)[MP])
+        game_state.attempt_spawn(DEMOLISHER, list(attack_path[0]), num=num)
 
     def spawn_scouts(self, game_state, attack_path):
         num_scouts = int(game_state.get_resource(MP) / game_state.type_cost(SCOUT)[MP])
-        game_state.attempt_spawn(SCOUT, attack_path[0], num=num_scouts)
+        game_state.attempt_spawn(SCOUT, list(attack_path[0]), num=num_scouts)
 
     '''
     //////////////
@@ -347,10 +343,10 @@ class AlgoStrategy(gamelib.AlgoCore):
                 damaged_structures.append((*loc, hp_lost))
             damage_in_quarter[self._x_to_quarter(loc[0])][0] += hp_lost
         edge_squares_reached = self.scored_on_last_turn
-        for sq in edge_squares_reached:
-            quarter = self._x_to_quarter(sq[0])
-            if quarter not in quarters_attacked:
-                quarters_attacked.append(quarter)
+##        for sq in edge_squares_reached:
+##            quarter = self._x_to_quarter(sq[0])
+##            if quarter not in quarters_attacked:
+##                quarters_attacked.append(quarter)
         damage_in_quarter.sort(reverse=True, key=lambda a:a[0])
         for a in damage_in_quarter:
             if a[0] and (a[1] not in quarters_attacked):
@@ -372,16 +368,16 @@ class AlgoStrategy(gamelib.AlgoCore):
         # More community tools available at: https://terminal.c1games.com/rules#Download
 
         # Place turrets that attack enemy units
-        turret_locations = [[6, 12], [11, 11], [16, 11], [21, 12]]
+        turret_locations = [[6, 10], [11, 9], [16, 9], [21, 10]]
         # attempt_spawn will try to spawn units if we have resources, and will check if a blocking unit is already there
         game_state.attempt_spawn(TURRET, turret_locations)
 
         # Place walls in front of turrets to soak up damage for them
-        wall_locations = [[0,13], [1,13], [2,13], [3,12], [4,12], [5,12], [6,13], [11,12], [16,12],
-                          [21,13], [22,12], [23,12], [24,12], [25,13], [26,13], [27,13]]
+        wall_locations = [[0,13], [1,13], [2,13], [3,12], [4,11], [5,10], [6,11], [11,10],
+                          [16,10], [21,11], [22,10], [23,11], [24,12], [25,13], [26,13], [27,13]]
         game_state.attempt_spawn(WALL, wall_locations)
         # Upgraded wall locations
-        wall_upg_locations = [[6,13], [11,12], [16,12], [21,13]]
+        wall_upg_locations = [[6,11], [11,10], [16,10], [21,11]]
         # upgrade walls so they soak more damage
         game_state.attempt_upgrade(wall_upg_locations)
 
@@ -390,6 +386,10 @@ class AlgoStrategy(gamelib.AlgoCore):
         for sq in wall_locations:
             self.defences_by_column[sq[0]] += 1
         self.turret_locations = [[loc, False] for loc in turret_locations]
+
+        #place later
+        self.destroyed_structures.append([2, 12, TURRET, 0])
+        self.destroyed_structures.append([25, 12, TURRET, 0])
 
     """
     //////
@@ -451,14 +451,23 @@ class AlgoStrategy(gamelib.AlgoCore):
     BUILDS DEFENCES
     //////
     """
-    def rebuild_destroyed(self, game_state, destroyed_structures):
+    def rebuild_destroyed(self, game_state, destroyed_structures, prioritise_quarter=None, max_spend=None):
         #Rebuilds the destroyed structures
+        current_SP = game_state.get_resource(SP)
+        if max_spend is None:
+            max_spend = current_SP
+        max_spend = min(max_spend, current_SP)
+        priority = lambda struc: ((100 if struc[2]==TURRET else 50 if struc[2]==WALL else 0)
+                                  + (100 if self._x_to_quarter(struc[0]) == prioritise_quarter else 0)
+                                  + struc[1])
+        destroyed_structures.sort(key=priority, reverse=True)
         for x, y, struc_type, damage_taken in destroyed_structures:
             loc = x, y
             if game_state.attempt_spawn(struc_type, loc):
-                self.defences_by_column[x] += 1
                 if struc_type == TURRET:
-                    self.turret_locations.append([loc, False])
+                    self.on_place_turret(game_state, loc)
+                else:
+                    self.defences_by_column[x] += 1
 
     def upgrade_walls(self, game_state, max_spend=None):
         #work out how many walls we can upgrade based on max spend
@@ -492,10 +501,10 @@ class AlgoStrategy(gamelib.AlgoCore):
 
         #choose where to place them
         turret_locs = [
-            [(2, 12), (4, 11), (5, 11)],
-            [(8, 11), (9, 11), (11,11), (12,11)],
-            [(15,11), (16,11), (18,11), (19,11)],
-            [(23,11), (24,11), (25,12)],
+            [[6, 10]],
+            [[8, 7],  [11,7]],
+            [[15,7],  [20,7]],
+            [[22,10]],
         ]
         turret_locs = turret_locs[quarter]
 
@@ -503,8 +512,7 @@ class AlgoStrategy(gamelib.AlgoCore):
         for loc in turret_locs:
             if game_state.attempt_spawn(TURRET, loc):
                 num_to_place -= 1
-                self.defences_by_column[loc[0]] += 1
-                self.turret_locations.append([loc, False])
+                self.on_place_turret(game_state, loc)
             if not num_to_place:
                 break
 
@@ -517,7 +525,9 @@ class AlgoStrategy(gamelib.AlgoCore):
                     num_upgraded += 1
             if not num_upgraded: #check none of the turrets are upgraded (we upgrade upto 1 per quarter)
                 furthest_forward_loc = max(turrets_in_quarter, key=lambda turret: turret[0][1])
-                return game_state.attempt_upgrade(furthest_forward_loc[0])
+                if game_state.attempt_upgrade(furthest_forward_loc[0]):
+                    furthest_forward_loc[1] = True
+                    return 1
         return 0
 
 ##    def upgrade_turrets(self, game_state, min_quart):

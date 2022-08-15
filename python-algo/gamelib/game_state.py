@@ -338,13 +338,13 @@ class GameState:
         if self.enable_warnings:
             fail_reason = ""
             if not affordable:
-                fail_reason = fail_reason + " Not enough resources."
+                fail_reason += " Not enough resources."
             if blocked:
-                fail_reason = fail_reason + " Location is blocked."
+                fail_reason += " Location is blocked."
             if not correct_territory:
-                fail_reason = fail_reason + " Location in enemy territory."
+                fail_reason += " Location in enemy territory."
             if not (stationary or on_edge):
-                fail_reason = fail_reason + " Information units must be deployed on the edge."
+                fail_reason += " Information units must be deployed on the edge."
             if len(fail_reason) > 0:
                 self.warn("Could not spawn {} at location {}.{}".format(unit_type, location, fail_reason))
 
